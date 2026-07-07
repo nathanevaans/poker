@@ -1,1 +1,15 @@
-
+{
+  "name": "poker-server",
+  "version": "1.0.0",
+  "description": "Authoritative Texas Hold'em server",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
