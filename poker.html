@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Poker</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            margin: 0; padding: 20px; min-height: 100vh;
+            display: flex; justify-content: center; align-items: safe center;
+            background: #0e0e12; color: #e8e8ee;
+            font-family: -apple-system, system-ui, sans-serif;
+        }
+        #wrap {
+            display: flex; gap: 20px; background: #17171f;
+            padding: 22px; border-radius: 10px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+        }
+        #controls { width: 260px; min-height: 620px; display: flex; flex-direction: column; }
+        #titleBlock { flex: 0 0 auto; }
+        #titleBlock h1 { font-size: 16px; margin: 0; font-weight: 600; }
+        #controlsInner {
+            flex: 1; display: flex; flex-direction: column;
+            gap: 12px; font-size: 13px; margin-top: 14px;
+        }
+        .sub { color: #888; font-size: 11px; line-height: 1.5; margin-bottom: 4px; }
+        .row { display: flex; flex-direction: column; gap: 4px; }
+        .row label { color: #aaa; font-size: 12px; display: flex; justify-content: space-between; }
+        input[type=range] { width: 100%; }
+        select, button, input[type=text], input[type=number] {
+            background: #23232e; color: #e8e8ee; border: 1px solid #33333f;
+            padding: 8px 10px; border-radius: 5px; font-size: 12px; cursor: pointer;
+            font-family: inherit;
+        }
+        #codeInput { text-transform: uppercase; cursor: text; letter-spacing: 2px; }
+        #nameInput, input[type=number] { text-transform: none; cursor: text; }
+        button:hover { background: #2d2d3a; }
+        button.primary { background: #5b6cff; border-color: #5b6cff; }
+        button.primary:hover { background: #6d7dff; }
+        button.danger { background: #7a2b2b; border-color: #7a2b2b; }
+        button.danger:hover { background: #8f3333; }
+        button:disabled, select:disabled, input:disabled { opacity: 0.4; cursor: not-allowed; }
+        .actBtns { display: flex; gap: 8px; }
+        .actBtns button { flex: 1; padding: 10px 4px; font-size: 13px; }
+        .status { font-family: monospace; font-size: 11px; color: #aaa; padding: 6px 0; min-height: 26px; }
+        #logBox {
+            background: #101017; border: 1px solid #23232e; border-radius: 6px;
+            padding: 8px; font-family: monospace; font-size: 10.5px; color: #9a9aa8;
+            height: 120px; overflow-y: auto; line-height: 1.5;
+        }
+        #logBox .win { color: #ffd479; }
+        canvas { background: #1f5c3a; border: 10px solid #000; border-radius: 12px; display: block; }
+        .divider { height: 1px; background: #23232e; margin: 2px 0; }
+        .seatChips { font-family: monospace; }
+    </style>
+</head>
+<body>
+<div id="wrap">
+    <div id="controls">
+        <div id="titleBlock"><h1>Poker · Texas Hold'em</h1></div>
+
+        <div id="controlsInner">
+            <div class="sub">Create a table, share the code, friends join and play. Virtual chips only.</div>
+
+            <div class="row">
+                <label>Your name</label>
+                <input type="text" id="nameInput" maxlength="14" placeholder="Nathan">
+            </div>
+
+            <div class="row">
+                <label>Room code</label>
+                <input type="text" id="codeInput" maxlength="6" placeholder="ABCD">
+            </div>
+
+            <div class="actBtns">
+                <button id="hostBtn" class="primary">Create table</button>
+                <button id="joinBtn">Join</button>
+            </div>
+
+            <div class="divider"></div>
+
+            <div class="row" id="stackRow">
+                <label>Starting chips <span id="stackVal">200</span></label>
+                <input type="range" id="stackSlider" min="50" max="1000" step="50" value="200">
+            </div>
+            <div class="row" id="blindRow">
+                <label>Small blind <span id="blindVal">1</span></label>
+                <input type="range" id="blindSlider" min="1" max="25" value="1">
+            </div>
+
+            <button id="startBtn" class="primary" style="display:none">Start hand</button>
+            <button id="nextBtn" class="primary" style="display:none">Deal next hand ▶</button>
+
+            <div class="row" id="actionArea" style="display:none">
+                <div class="row" id="raiseCtl">
+                    <label>Raise to <span id="betReadout">0</span></label>
+                    <input type="range" id="betSlider" min="0" max="100" value="0">
+                </div>
+                <div class="actBtns">
+                    <button id="foldBtn" class="danger">Fold</button>
+                    <button id="callBtn">Check</button>
+                    <button id="raiseBtn" class="primary">Bet</button>
+                </div>
+                <button id="allinBtn">All-in</button>
+            </div>
+
+            <div class="divider"></div>
+            <div class="status" id="status">Not connected.</div>
+            <div id="logBox"></div>
+        </div>
+    </div>
+
+    <canvas id="canvas" width="620" height="620"></canvas>
+</div>
+
+<script>
+    // ============================================================
+    // CONFIG — point this at your deployed poker server (server.js).
+    // The Othello relay won't work here: poker needs the authoritative
+    // server so hole cards can be dealt privately. Deploy server.js the
+    // same way (Render/Railway/Fly) and paste its wss:// URL below.
+    // ============================================================
+    const SERVER_URL = "wss://othello-wp7z.onrender.com";
+
+    // ---- card rendering helpers ----
+    const RANK_STR = ['2','3','4','5','6','7','8','9','10','J','Q','K','A'];
+    const SUIT_STR = ['\u2663','\u2666','\u2665','\u2660']; // clubs diamonds hearts spades
+    const cardRank = c => (c / 4) | 0;
+    const cardSuit = c => c % 4;
+    const isRed = c => cardSuit(c) === 1 || cardSuit(c) === 2;
+
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+    const W = canvas.width, H = canvas.height;
+
+    function drawCard(x, y, w, h, card, faceUp, dim) {
+        ctx.save();
+        roundRect(x, y, w, h, 5);
+        if (!faceUp) {
+            ctx.fillStyle = "#2c3d6b"; ctx.fill();
+            ctx.strokeStyle = "#0a1330"; ctx.lineWidth = 1.5; ctx.stroke();
+            ctx.fillStyle = "rgba(255,255,255,0.10)";
+            for (let i = 4; i < w - 4; i += 6) { ctx.fillRect(x + i, y + 4, 2, h - 8); }
+            ctx.restore(); return;
+        }
+        ctx.fillStyle = dim ? "#d8d8d0" : "#fdfdf5"; ctx.fill();
+        ctx.strokeStyle = "#222"; ctx.lineWidth = 1.2; ctx.stroke();
+        const r = cardRank(card), s = cardSuit(card);
+        ctx.fillStyle = isRed(card) ? (dim ? "#b04a4a" : "#d63b3b") : (dim ? "#444" : "#161616");
+        ctx.textAlign = "left"; ctx.textBaseline = "top";
+        ctx.font = "bold 15px system-ui";
+        ctx.fillText(RANK_STR[r], x + 4, y + 3);
+        ctx.font = "13px system-ui";
+        ctx.fillText(SUIT_STR[s], x + 4, y + 19);
+        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.font = "bold 20px system-ui";
+        ctx.fillText(SUIT_STR[s], x + w / 2, y + h / 2 + 4);
+        ctx.restore();
+    }
+    function roundRect(x, y, w, h, r) {
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.arcTo(x + w, y, x + w, y + h, r);
+        ctx.arcTo(x + w, y + h, x, y + h, r);
+        ctx.arcTo(x, y + h, x, y, r);
+        ctx.arcTo(x, y, x + w, y, r);
+        ctx.closePath();
+    }
+
+    // seat positions around an oval table (9 max)
+    function seatXY(idx, total) {
+        const cx = W / 2, cy = H / 2, rx = W * 0.40, ry = H * 0.40;
+        // start at bottom (you) and go clockwise
+        const ang = Math.PI / 2 + (idx / total) * Math.PI * 2;
+        return { x: cx + Math.cos(ang) * rx, y: cy + Math.sin(ang) * ry };
+    }
+
+    // ============================================================
+    // Client state
+    // ============================================================
+    let ws = null, connected = false;
+    let myId = null, mySeat = null, isHost = false;
+    let pub = null, priv = null;
+
+    const $ = id => document.getElementById(id);
+    const nameInput = $("nameInput"), codeInput = $("codeInput");
+    const hostBtn = $("hostBtn"), joinBtn = $("joinBtn");
+    const startBtn = $("startBtn"), nextBtn = $("nextBtn");
+    const stackSlider = $("stackSlider"), stackVal = $("stackVal");
+    const blindSlider = $("blindSlider"), blindVal = $("blindVal");
+    const actionArea = $("actionArea"), raiseCtl = $("raiseCtl");
+    const foldBtn = $("foldBtn"), callBtn = $("callBtn"), raiseBtn = $("raiseBtn"), allinBtn = $("allinBtn");
+    const betSlider = $("betSlider"), betReadout = $("betReadout");
+    const statusEl = $("status"), logBox = $("logBox");
+
+    stackSlider.oninput = () => { stackVal.textContent = stackSlider.value; sendConfig(); };
+    blindSlider.oninput = () => { blindVal.textContent = blindSlider.value; sendConfig(); };
+    betSlider.oninput = () => { betReadout.textContent = betSlider.value; };
+
+    function sendConfig() {
+        if (connected && isHost && pub && !pub.inHand)
+            send({ type: 'config', startStack: +stackSlider.value, sb: +blindSlider.value });
+    }
+    function send(o) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); }
+
+    function connect(create) {
+        let code = codeInput.value.toUpperCase().trim();
+        if (create && !code) code = Math.random().toString(36).slice(2, 6).toUpperCase();
+        if (!code) { alert("Enter a room code to join, or press Create table."); return; }
+        codeInput.value = code;
+        const name = nameInput.value.trim() || "Player";
+
+        if (ws) { try { ws.close(); } catch {} }
+        statusEl.textContent = "Connecting\u2026";
+        ws = new WebSocket(SERVER_URL);
+        ws.onopen = () => { connected = true; send({ type: 'join', code, name }); };
+        ws.onerror = () => { statusEl.textContent = "Connection error — is the poker server running?"; };
+        ws.onclose = () => { connected = false; statusEl.textContent = "Disconnected."; render(); };
+        ws.onmessage = (e) => {
+            let m; try { m = JSON.parse(e.data); } catch { return; }
+            if (m.type === 'joined') {
+                myId = m.you; mySeat = m.seat; isHost = m.host;
+                if (isHost) sendConfig();
+            } else if (m.type === 'state') {
+                pub = m.pub; priv = m.you;
+                render();
+            } else if (m.type === 'error') {
+                alert(m.text);
+            } else if (m.type === 'chat') {
+                appendLog(`${m.name}: ${m.text}`);
+            }
+        };
+    }
+    hostBtn.onclick = () => connect(true);
+    joinBtn.onclick = () => connect(false);
+    startBtn.onclick = () => send({ type: 'start' });
+    nextBtn.onclick = () => send({ type: 'next' });
+    foldBtn.onclick = () => act('fold');
+    callBtn.onclick = () => act(callBtn.dataset.kind);
+    raiseBtn.onclick = () => act(raiseBtn.dataset.kind, +betSlider.value);
+    allinBtn.onclick = () => act(pub.curBet === 0 ? 'bet' : 'raise', +allinBtn.dataset.max);
+
+    function act(kind, amount) {
+        send({ type: 'action', action: kind, amount: amount || 0 });
+        actionArea.style.display = 'none'; // optimistic lock until next state
+    }
+
+    // ============================================================
+    // Render
+    // ============================================================
+    function me() { return pub ? pub.players.find(p => p.id === myId) : null; }
+
+    function render() {
+        drawTable();
+        updatePanel();
+        renderLog();
+    }
+
+    function drawTable() {
+        ctx.fillStyle = "#1f5c3a"; ctx.fillRect(0, 0, W, H);
+        // felt oval
+        ctx.save();
+        ctx.strokeStyle = "rgba(255,255,255,0.10)"; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.ellipse(W/2, H/2, W*0.34, H*0.30, 0, 0, Math.PI*2); ctx.stroke();
+        ctx.restore();
+
+        if (!pub) {
+            ctx.fillStyle = "rgba(255,255,255,0.5)"; ctx.textAlign = "center";
+            ctx.font = "15px system-ui";
+            ctx.fillText("Create a table or join with a code to begin.", W/2, H/2);
+            return;
+        }
+
+        // pot + community
+        const cw = 40, ch = 56, gap = 7;
+        const comm = pub.community || [];
+        const total = 5 * cw + 4 * gap;
+        let sx = W/2 - total/2, cy = H/2 - ch/2;
+        for (let i = 0; i < 5; i++) {
+            const x = sx + i * (cw + gap);
+            if (comm[i] !== undefined) drawCard(x, cy, cw, ch, comm[i], true, false);
+            else { ctx.save(); roundRect(x, cy, cw, ch, 5); ctx.fillStyle = "rgba(0,0,0,0.12)"; ctx.fill(); ctx.restore(); }
+        }
+        ctx.fillStyle = "#ffe9a8"; ctx.textAlign = "center"; ctx.font = "bold 15px monospace";
+        ctx.fillText(`Pot ${pub.pot}`, W/2, cy - 16);
+
+        // seats — rotate so I'm at the bottom
+        const players = pub.players.slice().sort((a,b)=>a.seat-b.seat);
+        const n = players.length;
+        const myIdx = players.findIndex(p => p.id === myId);
+        for (let k = 0; k < n; k++) {
+            const p = players[(myIdx + k) % n];
+            drawSeat(p, seatXY(k, n));
+        }
+
+        // result banner
+        if (pub.result) {
+            const r = pub.result;
+            const winners = r.winners.map(s => (pub.players.find(pp=>pp.seat===s)||{}).name).filter(Boolean);
+            let msg;
+            if (r.byFold) msg = `${winners.join(', ')} wins the pot`;
+            else msg = `${winners.join(', ')} wins${r.hands && r.hands[r.winners[0]] ? ' — ' + r.hands[r.winners[0]].name : ''}`;
+            ctx.save();
+            ctx.fillStyle = "rgba(0,0,0,0.55)"; roundRect(W/2-180, H/2+70, 360, 34, 8); ctx.fill();
+            ctx.fillStyle = "#ffd479"; ctx.textAlign = "center"; ctx.font = "bold 15px system-ui";
+            ctx.fillText(msg, W/2, H/2 + 87 + 5);
+            ctx.restore();
+        }
+    }
+
+    function drawSeat(p, pos) {
+        const isMe = p.id === myId;
+        const active = pub.inHand && pub.toAct === p.seat;
+        const cw = 34, ch = 48, gap = 5;
+        // hole cards
+        let hole = null, faceUp = false, dim = false;
+        if (isMe && priv && priv.hole) { hole = priv.hole; faceUp = true; }
+        else if (p.revealed) { hole = p.revealed; faceUp = true; dim = false; }
+        else if (p.inHand && !p.folded) { hole = [0,0]; faceUp = false; }
+
+        const cardsW = 2 * cw + gap;
+        let hx = pos.x - cardsW/2, hy = pos.y - ch - 6;
+        if (hole) {
+            const showDim = p.folded;
+            drawCard(hx, hy, cw, ch, faceUp ? hole[0] : 0, faceUp, showDim);
+            drawCard(hx + cw + gap, hy, cw, ch, faceUp ? hole[1] : 0, faceUp, showDim);
+        }
+
+        // name plate
+        const pw = 120, ph = 40;
+        ctx.save();
+        roundRect(pos.x - pw/2, pos.y, pw, ph, 7);
+        ctx.fillStyle = active ? "#3a3f22" : "#12181a";
+        ctx.fill();
+        ctx.lineWidth = active ? 3 : 1.5;
+        ctx.strokeStyle = active ? "#ffcc55" : "rgba(0,0,0,0.5)";
+        ctx.stroke();
+        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillStyle = p.folded ? "#777" : "#e8e8ee";
+        ctx.font = "bold 12px system-ui";
+        let label = p.name + (isMe ? " (you)" : "");
+        ctx.fillText(label, pos.x, pos.y + 13);
+        ctx.fillStyle = p.allIn ? "#ff9a5b" : "#ffe9a8";
+        ctx.font = "12px monospace";
+        ctx.fillText(p.allIn ? "ALL-IN " + p.stack : String(p.stack) + " chips", pos.x, pos.y + 29);
+        ctx.restore();
+
+        // dealer button
+        if (pub.button === p.seat) {
+            ctx.save();
+            ctx.beginPath(); ctx.arc(pos.x + pw/2 + 10, pos.y + 8, 9, 0, Math.PI*2);
+            ctx.fillStyle = "#f4f4f6"; ctx.fill(); ctx.strokeStyle = "#000"; ctx.stroke();
+            ctx.fillStyle = "#000"; ctx.font = "bold 11px system-ui"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+            ctx.fillText("D", pos.x + pw/2 + 10, pos.y + 8);
+            ctx.restore();
+        }
+
+        // current street bet chips
+        const sb = pub.streetBets ? pub.streetBets[p.seat] : 0;
+        if (sb) {
+            const bx = pos.x, by = pos.y - ch - 30;
+            ctx.save();
+            ctx.fillStyle = "#c9a227"; ctx.beginPath(); ctx.arc(bx - 20, by, 7, 0, Math.PI*2); ctx.fill();
+            ctx.strokeStyle = "#000"; ctx.stroke();
+            ctx.fillStyle = "#ffe9a8"; ctx.font = "bold 12px monospace"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+            ctx.fillText(String(sb), bx - 8, by);
+            ctx.restore();
+        }
+    }
+
+    // ============================================================
+    // Panel
+    // ============================================================
+    function updatePanel() {
+        const iAmHost = pub && pub.hostId === myId;
+        isHost = iAmHost;
+        stackSlider.disabled = !iAmHost || (pub && pub.inHand);
+        blindSlider.disabled = !iAmHost || (pub && pub.inHand);
+
+        startBtn.style.display = 'none';
+        nextBtn.style.display = 'none';
+        actionArea.style.display = 'none';
+
+        if (!pub) { statusEl.textContent = connected ? "Connecting\u2026" : "Not connected."; return; }
+
+        const seated = pub.players.filter(p => !p.sittingOut && p.stack > 0).length;
+
+        if (!pub.inHand) {
+            if (iAmHost) {
+                if (pub.result) { nextBtn.style.display = ''; }
+                else { startBtn.style.display = ''; startBtn.disabled = seated < 2; }
+            }
+        }
+
+        // action controls when it's my turn
+        const meP = me();
+        if (pub.inHand && pub.toAct === mySeat && meP && !meP.folded && !meP.allIn) {
+            buildActionControls();
+            actionArea.style.display = '';
+        }
+
+        // status line
+        let s;
+        if (pub.inHand) {
+            const actor = pub.players.find(p => p.seat === pub.toAct);
+            s = `${cap(pub.street)} — ${actor ? actor.name : '?'} to act`;
+            if (pub.toAct === mySeat) s = `Your turn (${cap(pub.street)})`;
+        } else if (pub.result) {
+            s = iAmHost ? `Hand over. Deal the next hand.` : `Hand over. Waiting for host to deal.`;
+        } else {
+            s = `Table ${pub.code} · ${pub.players.length} seated. `;
+            if (seated < 2) s += "Waiting for players\u2026";
+            else s += iAmHost ? "Press Start hand." : "Waiting for host to start.";
+        }
+        statusEl.textContent = s;
+    }
+
+    function buildActionControls() {
+        const meP = me();
+        const cb = pub.curBet;
+        const myBet = pub.streetBets[mySeat] || 0;
+        const myStack = meP.stack;
+        const toCall = Math.max(0, cb - myBet);
+        const callAmt = Math.min(toCall, myStack);
+        const maxTo = myBet + myStack;
+        const minTo = cb === 0 ? Math.min(pub.bb, maxTo) : Math.min(cb + pub.minRaise, maxTo);
+
+        // check / call button
+        if (toCall === 0) { callBtn.textContent = "Check"; callBtn.dataset.kind = "check"; callBtn.disabled = false; }
+        else { callBtn.textContent = `Call ${callAmt}`; callBtn.dataset.kind = "call"; callBtn.disabled = false; }
+
+        // raise / bet
+        const canRaise = maxTo > cb && myStack > 0;
+        if (canRaise) {
+            raiseBtn.style.display = ''; raiseCtl.style.display = ''; allinBtn.style.display = '';
+            raiseBtn.textContent = cb === 0 ? "Bet" : "Raise";
+            raiseBtn.dataset.kind = cb === 0 ? "bet" : "raise";
+            betSlider.min = minTo; betSlider.max = maxTo;
+            betSlider.step = Math.max(1, Math.floor(pub.sb));
+            if (+betSlider.value < minTo || +betSlider.value > maxTo) betSlider.value = minTo;
+            betReadout.textContent = betSlider.value;
+            allinBtn.textContent = `All-in (${maxTo})`;
+            allinBtn.dataset.max = maxTo;
+        } else {
+            raiseBtn.style.display = 'none'; raiseCtl.style.display = 'none'; allinBtn.style.display = 'none';
+        }
+    }
+
+    // ============================================================
+    // Log
+    // ============================================================
+    let chatLog = [];
+    function appendLog(line) { chatLog.push(line); renderLog(); }
+    function renderLog() {
+        if (!pub) return;
+        const lines = (pub.log || []).concat(chatLog.slice(-4));
+        logBox.innerHTML = lines.map(l =>
+            /wins/.test(l) ? `<div class="win">${esc(l)}</div>` : `<div>${esc(l)}</div>`
+        ).join('');
+        logBox.scrollTop = logBox.scrollHeight;
+    }
+    function esc(s){ return s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+    function cap(s){ return s ? s[0].toUpperCase()+s.slice(1) : s; }
+
+    // boot
+    render();
+</script>
+</body>
+</html>
